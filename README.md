@@ -3,11 +3,11 @@
 
 Guidelines
 
-1.Use the help of AI in building the simulator.
-2.fork this repo... then start the project.
-3.All team members should contributed alteast one times.
-4.In every 20 min , one contribution needed from a team.
-5.judging  criteria will be there 
+- Use the help of AI in building the simulator.
+- fork this repo... then start the project.
+- All team members should contributed alteast one times.
+- In every 20 min , one contribution needed from a team.
+- judging  criteria will be there 
 
 # Drone Flight Training Simulator
 
