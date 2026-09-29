@@ -1,10 +1,13 @@
 @echo off
+cd /d "%~dp0"
 
 echo ========================================
 echo Building Drone Flight Training Simulator
 echo ========================================
 
-python -m PyInstaller --onefile --windowed --name DroneFlightSimulator main.py
+python -m pip install -r requirements.txt
+
+python -m PyInstaller --onefile --windowed --noconfirm --name DroneFlightSimulator --collect-all ursina main.py
 
 echo.
 echo ========================================
