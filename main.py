@@ -7,7 +7,7 @@ from ursina import *
 from ursina.lights import AmbientLight, DirectionalLight
 from ursina.shaders import basic_lighting_shader, unlit_shader
 
-from fx import C, load_sounds, scenery
+from fx import C, draw_track, load_sounds, ring_burst, scenery, sky_extras
 
 # ----------------------------------------------------------------- constants
 G = 9.81
@@ -26,13 +26,13 @@ SPAWN = Vec3(0, 0.1, 0)
 app = Ursina(title="Drone Flight Training Simulator", vsync=True)
 window.exit_button.visible = False
 window.color = C(120, 170, 230)
-Sky()
+sky = Sky()
 SND = load_sounds(app.loader)
 # lighting + fog (comment these 5 lines out if your GPU misbehaves)
 Entity.default_shader = basic_lighting_shader
 sun = DirectionalLight()
 sun.look_at(Vec3(.6, -1, .4))
-AmbientLight(color=C(95, 100, 125))
+amb = AmbientLight(color=C(95, 100, 125))
 scene.fog_color, scene.fog_density = C(150, 185, 225), (90, 450)
 rng = random.Random(42)
 
@@ -54,8 +54,9 @@ for name, p in PADS:
 
 
 class Ring(Entity):
-    def __init__(self, pos, yaw):
+    def __init__(self, pos, yaw, idx):
         super().__init__(position=pos, rotation_y=yaw)
+        self.idx, self.prev = idx, None
         self.got = False
         self.bits = []
         for i in range(24):
@@ -63,6 +64,8 @@ class Ring(Entity):
             self.bits.append(Entity(parent=self, model="cube", color=color.orange, shader=unlit_shader,
                                     position=(math.cos(a) * RING_R, math.sin(a) * RING_R, 0),
                                     scale=.55, rotation_z=math.degrees(a)))
+        Text(str(idx), parent=self, billboard=True, origin=(0, 0), position=(0, RING_R + 2.4, 0),
+             scale=50, color=color.gold)
 
     def set_got(self, v):
         self.got = v
@@ -75,7 +78,7 @@ for i in range(8):
     ang = i * 45 + 10
     r = 40 + i * 12
     pos = Vec3(math.sin(math.radians(ang)) * r, 6 + (i % 4) * 4.5, math.cos(math.radians(ang)) * r)
-    rings.append(Ring(pos, ang))
+    rings.append(Ring(pos, ang, i + 1))
 
 keep_clear = [p for _, p in PADS] + [r.position for r in rings]
 buildings = []  # (x, z, half_w, half_d, height)
@@ -84,7 +87,7 @@ while len(buildings) < 30 and tries < 2000:
     tries += 1
     x, z = rng.uniform(-250, 250), rng.uniform(-250, 250)
     w, d, h = rng.uniform(6, 14), rng.uniform(6, 14), rng.uniform(10, 45)
-    if math.hypot(x, z) < 16 or any(math.hypot(x - k.x, z - k.z) < 13 + max(w, d) / 2 for k in keep_clear):
+    if abs(x) < 12 or abs(z) < 12 or any(math.hypot(x - k.x, z - k.z) < 13 + max(w, d) / 2 for k in keep_clear):
         continue
     if any(abs(x - b[0]) < 22 and abs(z - b[1]) < 22 for b in buildings):
         continue
@@ -109,10 +112,13 @@ def floor_at(x, z, prev_y):
 
 # --------------------------------------------------------------------- HUD
 scenery(buildings, keep_clear)
+dots = draw_track(rings)
+stars, moon = sky_extras()
 Entity.default_shader = unlit_shader   # HUD / minimap stay flat-shaded
 Entity(parent=camera.ui, model="quad", color=C(0, 0, 0, 110), origin=(-.5, .5),
        position=window.top_left + Vec2(.01, -.01), scale=(.36, .37), z=1)
 flash = Entity(parent=camera.ui, model="quad", scale=(3, 2), color=C(255, 40, 20, 0), z=-.9)
+pop_txt = Text(parent=camera.ui, text=" ", origin=(0, 0), position=(0, .12), scale=2.5, color=color.lime)
 hud = Text(parent=camera.ui, position=window.top_left + Vec2(.02, -.02), scale=1.3,
            origin=(-.5, .5), color=color.white)
 score_txt = Text(parent=camera.ui, position=(0, .47), origin=(0, 0), scale=1.8, color=color.yellow)
@@ -131,11 +137,13 @@ help_txt = Text(parent=camera.ui, position=(-.85, .2), origin=(-.5, .5), scale=1
     "Q / E            yaw left / right\n"
     "R reset drone   T full reset   C camera   H help   ESC quit\n"
     "F altitude-hold assist (release SPACE/SHIFT to hover)\n"
-    "M timed MISSION: clear all rings, then land on a pad\n\n"
-    "Fly through orange rings, land softly (<4.5 m/s, <15 deg tilt)\n"
+    "M timed MISSION (3-2-1 start): fly the gates IN ORDER, then land\n"
+    "L day / night mode   N music on / off\n\n"
+    "Fly through the numbered rings IN ORDER (1 to 8) along the cyan path,\nthen land softly (<4.5 m/s, <15 deg tilt)\n"
     "on pads for precision points. Landing on a pad recharges battery."))
 
-S = {"score": 0, "msg_t": 0.0, "time": 0.0, "mission": False, "mtime": 0.0, "assist": False}
+S = {"score": 0, "msg_t": 0.0, "time": 0.0, "mission": False, "mtime": 0.0, "assist": False, "wrong_t": 0.0}
+POP = {"t": 0.0}
 
 # ---- persistent best score / best mission time
 SAVE = os.path.join(os.path.expanduser("~"), "drone_sim_scores.json")
@@ -205,6 +213,9 @@ class Drone(Entity):
                 self.leds.append(Entity(parent=t, model="sphere", scale=.06, position=(sx * .46, .09, sz * .46),
                                         color=color.green if sz > 0 else color.red, shader=unlit_shader))
         self.shake = self.flash_a = 0.0
+        self.flash_col = (255, 40, 20)
+        self.glow = Entity(parent=t, model="sphere", scale=.7, y=.05, color=C(60, 200, 255, 70),
+                           shader=unlit_shader, enabled=False)   # night underglow
         self.shadow = Entity(model="circle", rotation_x=90, color=C(0, 0, 0, 120))
         self.debris = []
         self.cam_mode = 0
@@ -217,6 +228,8 @@ class Drone(Entity):
         self.throttle = self.thrust = 0.0
         self.battery = 100.0
         self.crashed = self.landed = False
+        for r in rings:
+            r.prev = None
         self.rotation_y = 0
         self.tilt.rotation = (0, 0, 0)
         for d in self.debris:
@@ -244,7 +257,7 @@ class Drone(Entity):
         SND["motor"].setVolume(0)
         SND["wind"].setVolume(0)
         SND["crash"].play()
-        self.shake, self.flash_a = 1.2, 170
+        self.shake, self.flash_a, self.flash_col = 1.2, 170, (255, 40, 20)
         S["mission"] = False
         S["score"] = max(0, S["score"] - 50)
         say(f"CRASHED: {why}   (R to reset)", color.red, 999)
@@ -260,6 +273,7 @@ class Drone(Entity):
         if S["mission"]:
             S["mtime"] += dt
         S["msg_t"] -= dt
+        S["wrong_t"] -= dt
         if S["msg_t"] <= 0 and not self.crashed:
             msg_txt.text = ""
         for d in self.debris:  # explosion debris
@@ -346,7 +360,15 @@ class Drone(Entity):
         amt = self.shake + max(0, self.vel.length() - 14) * .012
         self.shake = max(0, self.shake - 1.5 * dt)
         self.flash_a = max(0, self.flash_a - 250 * dt)
-        flash.color = C(255, 40, 20, int(self.flash_a))
+        flash.color = C(*self.flash_col, int(self.flash_a))
+        if POP["t"] > 0:
+            POP["t"] -= dt
+            k = max(0, POP["t"])
+            pop_txt.color = C(140, 255, 140, int(255 * min(1, k * 2)))
+            pop_txt.scale = 2.2 + (1 - k) * 1.2
+            pop_txt.y = .12 + (1 - k) * .06
+        elif pop_txt.text != " ":
+            pop_txt.text = " "
         if amt > 0:
             camera.position += Vec3(rng.uniform(-1, 1), rng.uniform(-1, 1), 0) * amt * .3
 
@@ -361,7 +383,8 @@ class Drone(Entity):
         # ---- sound: motor pitch follows thrust, wind follows speed, low-battery beeps
         SND["motor"].setVolume(.06 + .5 * self.thrust if self.battery > 0 else 0)
         SND["motor"].setPlayRate(.6 + 1.6 * self.thrust)
-        SND["wind"].setVolume(min(1, spd / 18) * .6)
+        SND["wind"].setVolume(min(1, spd / 18) * (.5 + .1 * math.sin(S["time"] * .9)) * 1.2)  # gusting
+        self.glow.enabled = bool(S.get("night"))
         SND["wind"].setPlayRate(.8 + spd / 30)
         self.beep_t = getattr(self, "beep_t", 0) - dt
         if 0 < self.battery < 20 and self.beep_t <= 0:
@@ -416,29 +439,67 @@ class Drone(Entity):
 
     def check_rings(self):
         c = self.position + Vec3(0, .2, 0)
+        nxt = next((r for r in rings if not r.got), None)
         for r in rings:
-            if not r.got and (c - r.position).length() < RING_HIT:
-                r.set_got(True)
-                SND["chime"].play()
-                S["score"] += 100
-                n = sum(x.got for x in rings)
-                if n == len(rings):
-                    S["score"] += 300
-                    say("ALL RINGS CLEARED!  +300 bonus", color.gold, 4)
-                else:
-                    say(f"Ring {n}/{len(rings)}  +100", color.orange, 1.5)
+            y = math.radians(r.rotation_y)
+            d = c - r.position
+            lz = d.x * math.sin(y) + d.z * math.cos(y)   # signed distance to the ring's plane
+            lx = d.x * math.cos(y) - d.z * math.sin(y)
+            crossed = r.prev is not None and r.prev != lz and r.prev * lz <= 0
+            r.prev = lz
+            if r.got or not crossed or math.hypot(lx, d.y) > RING_R - .4:
+                continue
+            if r is nxt:
+                self.ring_cleared(r)
+            elif S["wrong_t"] <= 0:
+                S["wrong_t"] = 1.5
+                SND["buzz"].play()
+                say(f"Wrong order! Fly through ring #{nxt.idx} first", color.red, 1.5)
+
+    def ring_cleared(self, r):
+        r.set_got(True)
+        n = sum(x.got for x in rings)
+        SND["chime"].setPlayRate(1 + .06 * n)   # pitch climbs with every ring
+        SND["chime"].play()
+        ring_burst(r.position, r.rotation_y)
+        S["score"] += 100
+        self.flash_a, self.flash_col = 70, (60, 255, 120)
+        self.shake = max(self.shake, .25)
+        POP["t"] = 1.0
+        split = f"   split {S['mtime']:.1f}s" if S["mission"] else ""
+        if n == len(rings):
+            S["score"] += 300
+            SND["fanfare"].play()
+            pop_txt.text = "ALL 8 RINGS CLEARED!  +400"
+            say("Now land on a pad to finish!" + split, color.gold, 4)
+        else:
+            pop_txt.text = f"RING {r.idx} CLEARED!  +100"
+            say(f"Next: ring #{r.idx + 1}" + split, color.yellow, 1.8)
 
     def update_hud(self, alt):
         spd = self.vel.length()
         nxt = [r for r in rings if not r.got]
         if nxt:
-            tgt = min(nxt, key=lambda r: (r.position - self.position).length())
+            tgt = nxt[0]
             beam.enabled, beam.position = True, Vec3(tgt.x, 70, tgt.z)
-            nline = f"NEXT  {(tgt.position - self.position).length():6.0f} m"
+            nline = f"NEXT  #{tgt.idx}  {(tgt.position - self.position).length():4.0f} m"
         else:
             beam.enabled, nline = False, "NEXT  land on a pad"
         for r, dot in zip(rings, ring_dots):
             dot.color = color.lime if r.got else color.orange
+        ng = sum(r.got for r in rings)
+        for r in rings:
+            r.scale = 1
+        if nxt:  # pulsing, flashing next gate
+            tgt.scale = 1 + .08 * math.sin(S["time"] * 6)
+            pc = color.white if int(S["time"] * 4) % 2 else color.gold
+            for bt in tgt.bits:
+                bt.color = pc
+        if ng != S.get("seg"):  # show only the guide dots still ahead of you
+            S["seg"] = ng
+            for dd in dots:
+                dd.enabled = dd.seg >= ng
+                dd.scale = .55 if dd.seg == ng else .3
         me.position = Vec3(MC.x + self.x * K, MC.y + self.z * K, -.03)
         yy = math.radians(self.yaw)
         nose.position = me.position + Vec3(math.sin(yy) * .013, math.cos(yy) * .013, -.01)
@@ -478,6 +539,28 @@ Entity.default_shader = basic_lighting_shader
 drone = Drone()
 
 
+def begin_mission():
+    if not drone.crashed:
+        S["mission"] = True
+        SND["chime"].setPlayRate(1.5)
+        SND["chime"].play()
+        say("GO!", color.lime, 1.5)
+
+
+def set_night(on):
+    S["night"] = on
+    sky.enabled = not on
+    stars.enabled = on
+    tint = C(8, 10, 28) if on else C(150, 185, 225)
+    window.color = scene.fog_color = tint
+    amb.color = C(30, 36, 70) if on else C(95, 100, 125)
+    moon.color = C(225, 230, 255) if on else C(255, 235, 170)
+    try:
+        sun.color = C(90, 100, 170) if on else color.white
+    except Exception:
+        pass
+
+
 def input(key):
     if key == "escape":
         record()
@@ -490,10 +573,18 @@ def input(key):
         say("Altitude-hold assist " + ("ON" if S["assist"] else "OFF"), color.cyan, 1.5)
     elif key == "m":
         drone.reset()
-        S.update(score=0, time=0, mtime=0, mission=True)
+        S.update(score=0, time=0, mtime=0, mission=False)
         for r in rings:
             r.set_got(False)
-        say("MISSION: clear all 8 rings, then land on a pad. GO!", color.gold, 4)
+        for i, w in enumerate(("3", "2", "1")):   # countdown
+            invoke(say, w, color.gold, .9, delay=i)
+            invoke(SND["beep"].play, delay=i)
+        invoke(begin_mission, delay=3)
+    elif key == "l":
+        set_night(not S.get("night"))
+    elif key == "n":
+        S["music"] = not S.get("music")
+        SND["music"].play() if S["music"] else SND["music"].stop()
     elif key == "t":
         S["mission"] = False
         drone.reset()
@@ -511,4 +602,7 @@ SND["motor"].setVolume(0)
 SND["wind"].setVolume(0)
 SND["motor"].play()
 SND["wind"].play()
+SND["music"].setVolume(.3)
+SND["music"].play()
+S["music"] = True
 app.run()
