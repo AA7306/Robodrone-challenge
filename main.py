@@ -7,7 +7,7 @@ from ursina import *
 from ursina.lights import AmbientLight, DirectionalLight
 from ursina.shaders import basic_lighting_shader, unlit_shader
 
-from fx import load_sounds, scenery
+from fx import C, load_sounds, scenery
 
 # ----------------------------------------------------------------- constants
 G = 9.81
@@ -25,25 +25,25 @@ SPAWN = Vec3(0, 0.1, 0)
 
 app = Ursina(title="Drone Flight Training Simulator", vsync=True)
 window.exit_button.visible = False
-window.color = color.rgb(120, 170, 230)
+window.color = C(120, 170, 230)
 Sky()
 SND = load_sounds(app.loader)
 # lighting + fog (comment these 5 lines out if your GPU misbehaves)
 Entity.default_shader = basic_lighting_shader
 sun = DirectionalLight()
 sun.look_at(Vec3(.6, -1, .4))
-AmbientLight(color=color.rgb(95, 100, 125))
-scene.fog_color, scene.fog_density = color.rgb(150, 185, 225), (90, 450)
+AmbientLight(color=C(95, 100, 125))
+scene.fog_color, scene.fog_density = C(150, 185, 225), (90, 450)
 rng = random.Random(42)
 
 # ------------------------------------------------------------------- world
 Entity(model="plane", scale=600, texture="white_cube", texture_scale=(150, 150),
-       color=color.rgb(70, 120, 60))
+       color=C(70, 120, 60))
 
 pad_state = {}
 for name, p in PADS:
     Entity(model="circle", position=p + Vec3(0, .04, 0), rotation_x=90,
-           scale=PAD_R * 2, color=color.rgb(230, 230, 230))
+           scale=PAD_R * 2, color=C(230, 230, 230))
     Entity(model="circle", position=p + Vec3(0, .05, 0), rotation_x=90,
            scale=PAD_R * 1.4, color=color.azure if name == "HOME" else color.violet)
     Entity(model="circle", position=p + Vec3(0, .06, 0), rotation_x=90,
@@ -92,7 +92,7 @@ while len(buildings) < 30 and tries < 2000:
     shade = rng.randint(90, 170)
     Entity(model="cube", origin_y=-.5, position=(x, 0, z), scale=(w, h, d),
            texture="white_cube", texture_scale=(w / 2, h / 2),
-           color=color.rgb(shade, shade + 10, shade + 25))
+           color=C(shade, shade + 10, shade + 25))
 
 
 def floor_at(x, z, prev_y):
@@ -110,9 +110,9 @@ def floor_at(x, z, prev_y):
 # --------------------------------------------------------------------- HUD
 scenery(buildings, keep_clear)
 Entity.default_shader = unlit_shader   # HUD / minimap stay flat-shaded
-Entity(parent=camera.ui, model="quad", color=color.rgba(0, 0, 0, 110), origin=(-.5, .5),
+Entity(parent=camera.ui, model="quad", color=C(0, 0, 0, 110), origin=(-.5, .5),
        position=window.top_left + Vec2(.01, -.01), scale=(.36, .37), z=1)
-flash = Entity(parent=camera.ui, model="quad", scale=(3, 2), color=color.rgba(255, 40, 20, 0), z=-.9)
+flash = Entity(parent=camera.ui, model="quad", scale=(3, 2), color=C(255, 40, 20, 0), z=-.9)
 hud = Text(parent=camera.ui, position=window.top_left + Vec2(.02, -.02), scale=1.3,
            origin=(-.5, .5), color=color.white)
 score_txt = Text(parent=camera.ui, position=(0, .47), origin=(0, 0), scale=1.8, color=color.yellow)
@@ -163,7 +163,7 @@ def mm(x, z, sx, sy, col, zz=-.01):
                   position=(MC.x + x * K, MC.y + z * K, zz))
 
 
-mm(0, 0, .32, .32, color.rgba(0, 0, 0, 150), 0)
+mm(0, 0, .32, .32, C(0, 0, 0, 150), 0)
 for bx, bz, hw, hd, h in buildings:
     mm(bx, bz, max(2 * hw * K, .004), max(2 * hd * K, .004), color.gray)
 for _, pp in PADS:
@@ -171,7 +171,7 @@ for _, pp in PADS:
 ring_dots = [mm(r.x, r.z, .009, .009, color.orange, -.02) for r in rings]
 me = mm(0, 0, .011, .011, color.white, -.03)
 nose = mm(0, 0, .007, .007, color.red, -.04)
-beam = Entity(model="cube", scale=(.5, 140, .5), color=color.rgba(255, 230, 0, 80))
+beam = Entity(model="cube", scale=(.5, 140, .5), color=C(255, 230, 0, 80))
 
 
 def say(text, col=color.white, secs=2.5):
@@ -184,9 +184,9 @@ class Drone(Entity):
         super().__init__(position=SPAWN)
         self.tilt = Entity(parent=self)
         t = self.tilt
-        dk, gr = color.rgb(35, 38, 45), color.rgb(60, 64, 72)
+        dk, gr = C(35, 38, 45), C(60, 64, 72)
         Entity(parent=t, model="cube", scale=(.42, .12, .55), y=.16, color=dk)                     # fuselage
-        Entity(parent=t, model="cube", scale=(.3, .08, .3), y=.24, color=color.rgb(200, 60, 30))  # top shell
+        Entity(parent=t, model="cube", scale=(.3, .08, .3), y=.24, color=C(200, 60, 30))  # top shell
         Entity(parent=t, model="sphere", scale=.13, position=(0, .1, .3), color=color.black)      # gimbal camera
         Entity(parent=t, model="cube", scale=(1.25, .045, .09), y=.17, rotation_y=45, color=gr)
         Entity(parent=t, model="cube", scale=(1.25, .045, .09), y=.17, rotation_y=-45, color=gr)
@@ -201,11 +201,11 @@ class Drone(Entity):
                 self.blades.append(Entity(parent=t, model="cube", scale=(.6, .015, .05),
                                           position=(sx * .46, .21, sz * .46), color=color.light_gray))
                 self.discs.append(Entity(parent=t, model="circle", rotation_x=90, scale=.62,
-                                         position=(sx * .46, .215, sz * .46), color=color.rgba(230, 230, 230, 0)))
+                                         position=(sx * .46, .215, sz * .46), color=C(230, 230, 230, 0)))
                 self.leds.append(Entity(parent=t, model="sphere", scale=.06, position=(sx * .46, .09, sz * .46),
                                         color=color.green if sz > 0 else color.red, shader=unlit_shader))
         self.shake = self.flash_a = 0.0
-        self.shadow = Entity(model="circle", rotation_x=90, color=color.rgba(0, 0, 0, 120))
+        self.shadow = Entity(model="circle", rotation_x=90, color=C(0, 0, 0, 120))
         self.debris = []
         self.cam_mode = 0
         self.reset()
@@ -336,7 +336,7 @@ class Drone(Entity):
         self.shadow.position = Vec3(self.x, fl + .03, self.z)
         alt = max(0, self.y - fl)
         self.shadow.scale = 1.1 + alt * .04
-        self.shadow.color = color.rgba(0, 0, 0, int(max(20, 130 - alt * 3)))
+        self.shadow.color = C(0, 0, 0, int(max(20, 130 - alt * 3)))
         self.update_hud(alt)
         self.fx_update(dt, alt)
         self.camera_update(dt)
@@ -346,18 +346,18 @@ class Drone(Entity):
         amt = self.shake + max(0, self.vel.length() - 14) * .012
         self.shake = max(0, self.shake - 1.5 * dt)
         self.flash_a = max(0, self.flash_a - 250 * dt)
-        flash.color = color.rgba(255, 40, 20, int(self.flash_a))
+        flash.color = C(255, 40, 20, int(self.flash_a))
         if amt > 0:
             camera.position += Vec3(rng.uniform(-1, 1), rng.uniform(-1, 1), 0) * amt * .3
 
     def fx_update(self, dt, alt):
         spd = self.vel.length()
         for d in self.discs:  # spinning-prop blur
-            d.color = color.rgba(230, 230, 230, int(90 * self.thrust))
+            d.color = C(230, 230, 230, int(90 * self.thrust))
         blink = int(S["time"] * 3) % 2
         for i, l in enumerate(self.leds):
             if i % 2 == 0:
-                l.color = color.red if blink else color.rgb(70, 0, 0)
+                l.color = color.red if blink else C(70, 0, 0)
         # ---- sound: motor pitch follows thrust, wind follows speed, low-battery beeps
         SND["motor"].setVolume(.06 + .5 * self.thrust if self.battery > 0 else 0)
         SND["motor"].setPlayRate(.6 + 1.6 * self.thrust)
@@ -370,7 +370,7 @@ class Drone(Entity):
         # ---- prop-wash dust near the ground
         if alt < 3.5 and self.thrust > .25:
             for _ in range(2):
-                pf = Entity(model="sphere", shader=unlit_shader, scale=.25, color=color.rgba(190, 175, 150, 150),
+                pf = Entity(model="sphere", shader=unlit_shader, scale=.25, color=C(190, 175, 150, 150),
                             position=(self.x + rng.uniform(-.5, .5), self.y - alt + .1, self.z + rng.uniform(-.5, .5)))
                 pf.v, pf.life = Vec3(rng.uniform(-3, 3), rng.uniform(.3, 1.2), rng.uniform(-3, 3)), 0.0
                 self.puffs.append(pf)
@@ -378,7 +378,7 @@ class Drone(Entity):
             pf.life += dt
             pf.position += pf.v * dt
             pf.scale = .25 + pf.life * 1.4
-            pf.color = color.rgba(190, 175, 150, int(max(0, 150 * (1 - pf.life / .9))))
+            pf.color = C(190, 175, 150, int(max(0, 150 * (1 - pf.life / .9))))
             if pf.life > .9:
                 destroy(pf)
                 self.puffs.remove(pf)

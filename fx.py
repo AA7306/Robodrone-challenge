@@ -13,6 +13,11 @@ from ursina.shaders import unlit_shader
 SR = 22050
 
 
+def C(r, g, b, a=255):
+    """0-255 colour helper (color.rgb/rgba expect 0-1 floats in newer Ursina versions)."""
+    return color.Color(r / 255, g / 255, b / 255, a / 255)
+
+
 def _sfx(loader, name, seconds, fn, loop=False):
     """Synthesize fn(t, dur) -> [-1..1] into a temp .wav and load it as a Panda3D sound."""
     data = array("h", (int(max(-1, min(1, fn(i / SR, seconds))) * 14000) for i in range(int(seconds * SR))))
@@ -72,14 +77,14 @@ class Cloud(Entity):
 
 class Blink(Entity):
     def update(self):
-        self.color = color.red if int(time.time() * 1.6 + self.ph) % 2 else color.rgb(90, 0, 0)
+        self.color = color.red if int(time.time() * 1.6 + self.ph) % 2 else C(90, 0, 0)
 
 
 def scenery(buildings, keep):
     """Roof details + blinking aviation lights, trees, drifting clouds."""
     r = random.Random(5)
     for bx, bz, hw, hd, h in buildings:
-        Entity(model="cube", position=(bx - hw * .2, h + .6, bz), scale=(hw * 1.1, 1.2, hd * .8), color=color.rgb(70, 72, 80))
+        Entity(model="cube", position=(bx - hw * .2, h + .6, bz), scale=(hw * 1.1, 1.2, hd * .8), color=C(70, 72, 80))
         Entity(model="cube", position=(bx + hw * .4, h + 3, bz + hd * .3), scale=(.18, 6, .18), color=color.dark_gray)
         if h > 25:
             Blink(model="sphere", position=(bx + hw * .4, h + 6.2, bz + hd * .3), scale=.6,
@@ -92,10 +97,10 @@ def scenery(buildings, keep):
             continue
         n += 1
         h = r.uniform(4, 8)
-        Entity(model="cube", origin_y=-.5, position=(x, 0, z), scale=(.5, h * .45, .5), color=color.rgb(90, 60, 35))
+        Entity(model="cube", origin_y=-.5, position=(x, 0, z), scale=(.5, h * .45, .5), color=C(90, 60, 35))
         Entity(model="sphere", position=(x, h * .7, z), scale=(h * .55, h * .75, h * .55),
-               color=color.rgb(30, r.randint(70, 130), 40))
+               color=C(30, r.randint(70, 130), 40))
     for _ in range(24):
         Cloud(model="sphere", position=(r.uniform(-400, 400), r.uniform(110, 190), r.uniform(-300, 300)),
               scale=(r.uniform(50, 110), r.uniform(8, 16), r.uniform(30, 60)),
-              color=color.rgba(255, 255, 255, 190), shader=unlit_shader, sp=r.uniform(1, 4))
+              color=C(255, 255, 255, 190), shader=unlit_shader, sp=r.uniform(1, 4))
