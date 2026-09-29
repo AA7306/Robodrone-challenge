@@ -6,8 +6,8 @@ Guidelines
 1.Use the help of AI in building the simulator.
 2.fork this repo... then start the project.
 3.All team members should contributed alteast one times.
-4.In every 15 min , one contribution needed from a team.
-5.Gudging  criteria will be there 
+4.In every 20 min , one contribution needed from a team.
+5.judging  criteria will be there 
 
 # Drone Flight Training Simulator
 
@@ -46,7 +46,7 @@ Tip: hover throttle is ~50%. Hold SPACE until you lift off, then feather it.
 
 1. Install **Python 3.10 or newer** from https://python.org
    (check "Add Python to PATH" during install).
-2. Copy this whole folder to your Windows machine.
+2. Create the project based on below given folder structure.
 3. Double-click **`build.bat`**.
 4. Your standalone executable appears at:
 
