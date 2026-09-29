@@ -1,5 +1,7 @@
 """Drone Flight Training Simulator - Python + Ursina (Panda3D)."""
+import json
 import math
+import os
 import random
 from ursina import *
 
@@ -111,11 +113,49 @@ help_txt = Text(parent=camera.ui, position=(-.85, .2), origin=(-.5, .5), scale=1
     "W / S            pitch forward / back\n"
     "A / D            roll left / right\n"
     "Q / E            yaw left / right\n"
-    "R reset drone   T full reset   C camera   H help   ESC quit\n\n"
+    "R reset drone   T full reset   C camera   H help   ESC quit\n"
+    "F altitude-hold assist (release SPACE/SHIFT to hover)\n"
+    "M timed MISSION: clear all rings, then land on a pad\n\n"
     "Fly through orange rings, land softly (<4.5 m/s, <15 deg tilt)\n"
     "on pads for precision points. Landing on a pad recharges battery."))
 
-S = {"score": 0, "msg_t": 0.0, "time": 0.0}
+S = {"score": 0, "msg_t": 0.0, "time": 0.0, "mission": False, "mtime": 0.0, "assist": False}
+
+# ---- persistent best score / best mission time
+SAVE = os.path.join(os.path.expanduser("~"), "drone_sim_scores.json")
+try:
+    BEST = json.load(open(SAVE))
+except Exception:
+    BEST = {"score": 0, "time": None}
+
+
+def record():
+    BEST["score"] = max(BEST["score"], S["score"])
+    try:
+        json.dump(BEST, open(SAVE, "w"))
+    except Exception:
+        pass
+
+
+# ---- minimap (top-right, north = up) + beacon beam over the next ring
+K = .32 / (2 * WORLD_LIMIT)
+MC = window.top_right + Vec2(-.2, -.2)
+
+
+def mm(x, z, sx, sy, col, zz=-.01):
+    return Entity(parent=camera.ui, model="quad", color=col, scale=(sx, sy),
+                  position=(MC.x + x * K, MC.y + z * K, zz))
+
+
+mm(0, 0, .32, .32, color.rgba(0, 0, 0, 150), 0)
+for bx, bz, hw, hd, h in buildings:
+    mm(bx, bz, max(2 * hw * K, .004), max(2 * hd * K, .004), color.gray)
+for _, pp in PADS:
+    mm(pp.x, pp.z, .012, .012, color.azure)
+ring_dots = [mm(r.x, r.z, .009, .009, color.orange, -.02) for r in rings]
+me = mm(0, 0, .011, .011, color.white, -.03)
+nose = mm(0, 0, .007, .007, color.red, -.04)
+beam = Entity(model="cube", scale=(.5, 140, .5), color=color.rgba(255, 230, 0, 80))
 
 
 def say(text, col=color.white, secs=2.5):
@@ -174,6 +214,8 @@ class Drone(Entity):
         self.crashed = True
         self.visible = False
         self.shadow.visible = False
+        record()
+        S["mission"] = False
         S["score"] = max(0, S["score"] - 50)
         say(f"CRASHED: {why}   (R to reset)", color.red, 999)
         for _ in range(28):
@@ -185,6 +227,8 @@ class Drone(Entity):
     def update(self):
         dt = min(time.dt, 1 / 30)
         S["time"] += dt
+        if S["mission"]:
+            S["mtime"] += dt
         S["msg_t"] -= dt
         if S["msg_t"] <= 0 and not self.crashed:
             msg_txt.text = ""
@@ -200,6 +244,9 @@ class Drone(Entity):
         # ---- pilot input
         hk = held_keys
         self.throttle = clamp(self.throttle + (hk["space"] - hk["left shift"]) * THROTTLE_RATE * dt, 0, 1)
+        if S["assist"] and not self.landed and not (hk["space"] or hk["left shift"]):
+            cosa = max(.5, math.cos(math.radians(self.pitch)) * math.cos(math.radians(self.roll)))
+            self.throttle += (clamp(.5 / cosa - self.vel.y * .12, 0, 1) - self.throttle) * min(1, 5 * dt)
         self.yaw += (hk["e"] - hk["q"]) * YAW_RATE * dt
         want_p = (hk["w"] - hk["s"]) * MAX_TILT
         want_r = (hk["d"] - hk["a"]) * MAX_TILT
@@ -263,6 +310,16 @@ class Drone(Entity):
         self.camera_update(dt)
 
     def on_touchdown(self):
+        if S["mission"] and all(r.got for r in rings) and \
+                any(math.hypot(self.x - p.x, self.z - p.z) < PAD_R for _, p in PADS):
+            bonus = max(0, 500 - int(S["mtime"] * 2))
+            S["score"] += bonus
+            S["mission"] = False
+            if BEST["time"] is None or S["mtime"] < BEST["time"]:
+                BEST["time"] = round(S["mtime"], 1)
+            record()
+            say(f"MISSION COMPLETE in {S['mtime']:.1f}s!  +{bonus} time bonus", color.gold, 6)
+            return
         for name, p in PADS:
             d = math.hypot(self.x - p.x, self.z - p.z)
             if d < PAD_R and pad_state[name]:
@@ -296,13 +353,29 @@ class Drone(Entity):
 
     def update_hud(self, alt):
         spd = self.vel.length()
+        nxt = [r for r in rings if not r.got]
+        if nxt:
+            tgt = min(nxt, key=lambda r: (r.position - self.position).length())
+            beam.enabled, beam.position = True, Vec3(tgt.x, 70, tgt.z)
+            nline = f"NEXT  {(tgt.position - self.position).length():6.0f} m"
+        else:
+            beam.enabled, nline = False, "NEXT  land on a pad"
+        for r, dot in zip(rings, ring_dots):
+            dot.color = color.lime if r.got else color.orange
+        me.position = Vec3(MC.x + self.x * K, MC.y + self.z * K, -.03)
+        yy = math.radians(self.yaw)
+        nose.position = me.position + Vec3(math.sin(yy) * .013, math.cos(yy) * .013, -.01)
+        if S["score"] > BEST["score"]:
+            BEST["score"] = S["score"]
         bcol = "" if self.battery > 20 else " LOW!"
         hud.text = (f"ALT   {alt:6.1f} m\nSPEED {spd * 3.6:6.1f} km/h\nV/S   {self.vel.y:+6.1f} m/s\n"
                     f"HDG   {self.yaw % 360:6.0f} deg\nTHR   {self.throttle * 100:6.0f} %\n"
                     f"BATT  {self.battery:6.0f} %{bcol}\nTIME  {S['time']:6.0f} s\n"
+                    f"{nline}\nASSIST {'ON' if S['assist'] else 'off'}   {('MISSION %.1f s' % S['mtime']) if S['mission'] else ''}\n"
                     f"CAM   {['CHASE', 'FPV', 'ORBIT'][self.cam_mode]}   [H] help")
         hud.color = color.red if self.battery < 20 else color.white
-        score_txt.text = f"SCORE {S['score']}    RINGS {sum(r.got for r in rings)}/{len(rings)}"
+        score_txt.text = (f"SCORE {S['score']}    RINGS {sum(r.got for r in rings)}/{len(rings)}    BEST {BEST['score']}"
+                          + (f"    BEST TIME {BEST['time']}s" if BEST["time"] else ""))
         thr_fill.scale_y = .3 * self.throttle
         thr_fill.color = color.lime if abs(self.throttle - .5) < .06 else color.orange
 
@@ -329,10 +402,22 @@ drone = Drone()
 
 def input(key):
     if key == "escape":
+        record()
         application.quit()
     elif key == "r":
+        record()
         drone.reset()
+    elif key == "f":
+        S["assist"] = not S["assist"]
+        say("Altitude-hold assist " + ("ON" if S["assist"] else "OFF"), color.cyan, 1.5)
+    elif key == "m":
+        drone.reset()
+        S.update(score=0, time=0, mtime=0, mission=True)
+        for r in rings:
+            r.set_got(False)
+        say("MISSION: clear all 8 rings, then land on a pad. GO!", color.gold, 4)
     elif key == "t":
+        S["mission"] = False
         drone.reset()
         S["score"] = 0
         for r in rings:
